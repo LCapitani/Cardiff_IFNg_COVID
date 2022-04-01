@@ -1,0 +1,608 @@
+```{r}
+#Load necessary libraries
+
+library(tidyverse)
+library(broom)
+library(dplyr)
+
+#Read in files
+covid_data_cap <- read.csv("/Users/lorenzocapitani/OneDrive\ -\ Cardiff\ University/Bioinformatics/MartinPaper/SC2_Key\ Data_Lorenzo_Cap.csv")
+covid_data_vein <- read.csv("/Users/lorenzocapitani/OneDrive\ -\ Cardiff\ University/Bioinformatics/MartinPaper/SC2_Key\ Data_Lorenzo_Vein.csv")
+
+names(covid_data_cap)
+```
+
+```{r, fig.height=10}
+
+#Clean dataset: convert binary factors to 1 or 0 
+covid_data_cap$COVID.19.Positive. <- ifelse(test=covid_data_cap$COVID.19.Positive. == "Y", yes=1, no=0)
+covid_data_cap$Vaccinated. <- ifelse(test=covid_data_cap$Vaccinated. == "Y", yes=1, no=0)
+covid_data_cap$Prior.COVID.19. <- ifelse(test=covid_data_cap$Prior.COVID.19. == "Y", yes=1, no=0)
+covid_data_cap[covid_data_cap$Gender == "male",]$Gender <- 0
+covid_data_cap[covid_data_cap$Gender == "female",]$Gender <- 1
+covid_data_cap$Gender <- as.integer(covid_data_cap$Gender)
+covid_data_cap$Significant.co.morbidity. <- ifelse(test=covid_data_cap$Significant.co.morbidity. == "Y", yes=1, no=0)
+
+#Repeat for venous dataset
+covid_data_vein$COVID.19.Positive. <- ifelse(test=covid_data_vein$COVID.19.Positive. == "Y", yes=1, no=0)
+covid_data_vein$Vaccinated. <- ifelse(test=covid_data_vein$Vaccinated. == "Y", yes=1, no=0)
+covid_data_vein$Prior.COVID.19. <- ifelse(test=covid_data_vein$Prior.COVID.19. == "Y", yes=1, no=0)
+covid_data_vein[covid_data_vein$Gender == "M",]$Gender <- 0
+covid_data_vein[covid_data_vein$Gender == "F",]$Gender <- 1
+covid_data_vein$Gender <- as.integer(covid_data_vein$Gender)
+
+#A visual take on the missing values 
+library(Amelia)
+missmap(covid_data_vein, main = "Missing values vs observed in vein dataset")
+missmap(covid_data_cap, main = "Missing values vs observed in cap dataset")
+
+# Mean interpolation for the few missing values present
+covid_data_vein$Age[is.na(covid_data_vein$Age)] <- mean(covid_data_vein$Age,na.rm=T)
+covid_data_vein$RBD.IgG[is.na(covid_data_vein$RBD.IgG)] <- mean(covid_data_vein$RBD.IgG,na.rm=T)
+
+covid_data_cap$Age[is.na(covid_data_cap$Age)] <- mean(covid_data_cap$Age,na.rm=T)
+covid_data_cap$IFNg[is.na(covid_data_cap$IFNg)] <- mean(covid_data_cap$IFNg,na.rm=T)
+
+
+missmap(covid_data_vein, main = "Missing values vs observed in vein dataset")
+missmap(covid_data_cap, main = "Missing values vs observed in cap dataset")
+
+```
+
+
+```{r}
+#Let's have a look at the data - not used in publication, solyely exploratory
+
+
+covid_data_cap <- covid_data_cap %>% add_column("Origin" = "Capillary")
+covid_data_vein <- covid_data_vein %>% add_column("Origin" = "Venous")
+
+numeric_covid_merged <- rbind(covid_data_cap[,c(2,3,4,6,7,8,10,12)],  covid_data_vein[,c(2,3,4,5,6,7,8,9)])
+
+#Age
+ggplot(numeric_covid_merged, aes(x=Age, color=Origin)) +
+  geom_histogram(alpha=0.5, position = "dodge") +
+  geom_vline(data=numeric_covid_merged[numeric_covid_merged$Origin == "Capillary",],aes(xintercept=mean(Age), color=Origin),
+             linetype="dashed") + 
+  geom_vline(data=numeric_covid_merged[numeric_covid_merged$Origin == "Venous",],aes(xintercept=mean(Age), color=Origin),
+             linetype="dashed") + theme_template
+
+
+#Gender
+table1 = table(numeric_covid_merged$Gender, numeric_covid_merged$Origin)
+rownames(table1) <- c("Male", "Female")
+
+mosaicplot(table1, main = "Mosaic Plot of Gender in the two datasets")
+
+
+#Age table to look at infections
+numeric_covid_merged$Age <- ifelse(numeric_covid_merged$Age > 50, "Over 50", "Under 50")
+table1 = table(numeric_covid_merged$Age, numeric_covid_merged$COVID.19.Positive., numeric_covid_merged$Origin)
+colnames(table1) <- c("Not infection", "Infected")
+
+mosaicplot(table1, main = "Mosaic Plot of Age vs COVID infection")
+
+#Gender
+table1 = table(numeric_covid_merged$Gender, numeric_covid_merged$COVID.19.Positive., numeric_covid_merged$Origin)
+rownames(table1) <- c("Male", "Female")
+colnames(table1) <- c("Not infection", "Infected")
+mosaicplot(table1, main = "Mosaic Plot of Gender in the two datasets")
+
+
+#Vaccination status
+table1 = table(numeric_covid_merged$Vaccinated., numeric_covid_merged$Origin)
+rownames(table1) <- c("No", "Yes")
+
+mosaicplot(table1, main = "Vaccination status")
+
+#Prior infection  status
+table1 = table(numeric_covid_merged$Prior.COVID.19., numeric_covid_merged$Origin)
+rownames(table1) <- c("No", "Yes")
+
+mosaicplot(table1, main = "Prior COVID infection status")
+
+```
+
+
+```{r}
+#Preliminary univariate analysis of variables from venous dataset - not used in publication
+
+library(ggplot2)
+library(ggbeeswarm)
+library(ggpubr)
+
+numeric_covid_vein <- covid_data_vein[,c(2,3,4,5,6,7,8)]
+numeric_covid_vein$COVID.19.Positive. <- factor(numeric_covid_vein$COVID.19.Positive.)
+numeric_covid_vein$Vaccinated. <- factor(numeric_covid_vein$Vaccinated.)
+numeric_covid_vein$Prior.COVID.19. <- factor(numeric_covid_vein$Prior.COVID.19.)
+numeric_covid_vein$Gender <- factor(numeric_covid_vein$Gender)
+
+
+ggplot(numeric_covid_vein, aes(x = COVID.19.Positive., y = IFNg)) +
+  geom_violin() +
+  geom_quasirandom(width = 0.2) +
+  scale_x_discrete(labels = c("No", "Yes")) + 
+  xlab("Breakthrough COVID19 infection") +
+  ylab("IFNg (pg/ml)") +
+  theme_template + stat_compare_means(label.x.npc = 0.4)
+
+ggplot(numeric_covid_vein, aes(x = COVID.19.Positive., y = RBD.IgG)) +
+  geom_violin() +
+  geom_quasirandom(width = 0.2) +
+  scale_x_discrete(labels = c("No", "Yes")) + 
+  xlab("Breakthrough COVID19 infection") +
+  ylab("Ant-RBD IgG titres") +
+  theme_template +
+  stat_compare_means(label.x.npc = 0.4)
+
+
+ggplot(numeric_covid_vein, aes(x = COVID.19.Positive., fill = Vaccinated.)) +
+  geom_bar(stat ='count',position = "dodge2") +
+  scale_x_discrete(labels = c("No", "Yes")) + 
+  xlab("Breakthrough COVID19 infection") +
+  ylab("Count") +
+  theme_template +
+  labs(fill = "Vaccinated") +
+  scale_fill_manual(labels = c("No", "Yes"), values = c("brown3", "darkgoldenrod1")) 
+
+
+ggplot(numeric_covid_vein, aes(x = COVID.19.Positive., fill = Prior.COVID.19.)) +
+  geom_bar(stat ='count',position = "dodge2") +
+  scale_x_discrete(labels = c("No", "Yes")) + 
+  xlab("Breakthrough COVID19 infection") +
+  ylab("Count") +
+  theme_template +
+  labs(fill = "Prior COVID infection") +
+  scale_fill_manual(labels = c("No", "Yes"), values = c("brown3", "darkgoldenrod1")) 
+
+ggplot(numeric_covid_vein, aes(x = COVID.19.Positive., fill = Gender)) +
+  geom_bar(stat ='count',position = "dodge2") +
+  scale_x_discrete(labels = c("No", "Yes")) + 
+  xlab("Breakthrough COVID19 infection") +
+  ylab("Count") +
+  theme_template +
+  labs(fill = "Gender") +
+  scale_fill_manual(labels = c("Male", "Female"), values = c("brown3", "darkgoldenrod1")) 
+
+ggplot(numeric_covid_vein, aes(x = COVID.19.Positive., y = Age)) +
+    geom_violin() +
+  geom_quasirandom(width = 0.2) +
+  xlab("Breakthrough COVID19 infection") +
+  ylab("Age") +
+  theme_template +
+    scale_x_discrete(labels = c("No", "Yes"))+
+  stat_compare_means(label.x.npc = 0.4)
+
+
+
+```
+
+Univariate analysis of capillary dataset
+
+```{r}
+
+#Preliminary univariate analysis of variables from capillary dataset - not used in publication
+
+
+numeric_covid_cap <- covid_data_cap[,c(2,3,4,5,6,7,8,9,10)]
+numeric_covid_cap$COVID.19.Positive. <- factor(numeric_covid_cap $COVID.19.Positive.)
+numeric_covid_cap$Vaccinated. <- factor(numeric_covid_cap $Vaccinated.)
+numeric_covid_cap$Prior.COVID.19. <- factor(numeric_covid_cap $Prior.COVID.19.)
+numeric_covid_cap$Gender <- factor(numeric_covid_cap $Gender)
+numeric_covid_cap$Significant.co.morbidity. <- factor(numeric_covid_cap$Significant.co.morbidity.)
+
+ggplot(numeric_covid_cap , aes(x = COVID.19.Positive., y = IFNg)) +
+  geom_violin() +
+  geom_quasirandom(width = 0.2) +
+  scale_x_discrete(labels = c("No", "Yes")) + 
+  xlab("Breakthrough COVID19 infection") +
+  ylab("IFNg (pg/ml)") +
+  theme_template + stat_compare_means(label.x.npc = 0.4)
+
+ggplot(numeric_covid_cap , aes(x = COVID.19.Positive., y = RBD.IgG)) +
+  geom_violin() +
+  geom_quasirandom(width = 0.2) +
+  scale_x_discrete(labels = c("No", "Yes")) + 
+  xlab("Breakthrough COVID19 infection") +
+  ylab("Ant-RBD IgG titres") +
+  theme_template +
+  stat_compare_means(label.x.npc = 0.4)
+
+
+ggplot(numeric_covid_cap , aes(x = COVID.19.Positive., fill = Vaccinated.)) +
+  geom_bar(stat ='count',position = "dodge2") +
+  scale_x_discrete(labels = c("No", "Yes")) + 
+  xlab("Breakthrough COVID19 infection") +
+  ylab("Count") +
+  theme_template +
+  labs(fill = "Vaccinated") +
+  scale_fill_manual(labels = c("No", "Yes"), values = c("brown3", "darkgoldenrod1")) 
+
+
+
+ggplot(numeric_covid_cap , aes(x = COVID.19.Positive., fill = Prior.COVID.19.)) +
+  geom_bar(stat ='count',position = "dodge2") +
+  scale_x_discrete(labels = c("No", "Yes")) + 
+  xlab("Breakthrough COVID19 infection") +
+  ylab("Count") +
+  theme_template +
+  labs(fill = "Prior COVID infection") +
+  scale_fill_manual(labels = c("No", "Yes"), values = c("brown3", "darkgoldenrod1")) 
+
+ggplot(numeric_covid_cap , aes(x = COVID.19.Positive., fill = Gender)) +
+  geom_bar(stat ='count',position = "dodge2") +
+  scale_x_discrete(labels = c("No", "Yes")) + 
+  xlab("Breakthrough COVID19 infection") +
+  ylab("Count") +
+  theme_template +
+  labs(fill = "Gender") +
+  scale_fill_manual(labels = c("Male", "Female"), values = c("brown3", "darkgoldenrod1")) 
+
+ggplot(numeric_covid_cap , aes(x = COVID.19.Positive., fill = Significant.co.morbidity.)) +
+  geom_bar(stat ='count',position = "dodge2") +
+  scale_x_discrete(labels = c("No", "Yes")) + 
+  xlab("Breakthrough COVID19 infection") +
+  ylab("Count") +
+  theme_template +
+  labs(fill = "Significant comorbidity") +
+  scale_fill_manual(labels = c("Male", "Female"), values = c("brown3", "darkgoldenrod1")) 
+
+
+ggplot(numeric_covid_cap , aes(x = COVID.19.Positive., y = Age)) +
+    geom_violin() +
+  geom_quasirandom(width = 0.2) +
+  xlab("Breakthrough COVID19 infection") +
+  ylab("Age") +
+  theme_template +
+    scale_x_discrete(labels = c("No", "Yes"))+
+  stat_compare_means(label.x.npc = 0.4)
+
+
+```
+
+
+```{r, fig.height=10, fig.width=10}
+options(warn=-1)
+# Spearman's Rank Correlation Matrix included in publication
+library(corrplot)
+
+
+numeric_covid_cap <- covid_data_cap[,c(2,3,4,5,6,7,8,9,10)]
+numeric_covid_vein <- covid_data_vein[,c(2,3,4,5,6,7,8)]
+covid_vein_cor_matrix <- cor(numeric_covid_vein, use = "complete.obs", method = "spearman")
+covid_cap_cor_matrix <- cor(numeric_covid_cap, use = "complete.obs", method = "spearman")
+
+#Obtain p-value matrix for each comparison and fix for multiple comparisons 
+testRes_vein = cor.mtest(numeric_covid_vein, conf.level = 0.95,  method = "spearman", adjust="holm")
+testRes_cap = cor.mtest(numeric_covid_cap, conf.level = 0.95,  method = "spearman", adjust="holm")
+
+corrplot(covid_vein_cor_matrix, p.mat = testRes_vein$p, sig.level = 0.05, method = 'square', order="original", tl.cex = 2, tl.col = "black", insig = "blank", type = 'lower') 
+title(main = "Vein dataset", cex.main =2, line = 0)
+corrplot(covid_cap_cor_matrix, p.mat = testRes_cap$p, sig.level = 0.05, method = 'square', order="original", tl.cex = 2, tl.col = "black", insig = "blank", type = 'lower') 
+title(main = "Capillary dataset", cex.main =2, line = 0)
+
+```
+
+
+```{r}
+# Binary Logisitic Regression model development
+library(ggplot2)
+library(OddsPlotty)
+library(caret)
+library(tidyverse)
+library(rms)
+
+# Generate testdata for manual scaling
+testdata <- numeric_covid_vein
+
+ # Set up null model
+model_null <- glm(COVID.19.Positive.~ 1, data=numeric_covid_vein, family=binomial(link='logit'))
+ # Set up full model
+model_vein <- glm(COVID.19.Positive.~ ., data=numeric_covid_vein, family=binomial(link='logit'))
+summary(model_vein)
+
+#Derive model pvalue and pseudo R^2
+model_pval <- anova(model_null, model_vein, test = 'LRT')
+rsqrd <- lrm(COVID.19.Positive.~ ., data=testdata)
+
+
+#Derive odds ratios with 95% CI and plot
+odds <- odds_plot(model_vein)
+odds <- odds$odds_data
+odds$OR <- log(odds$OR)
+odds$lower <- log(odds$lower)
+odds$upper <- log(odds$upper)
+
+
+# Visualisations of odds ratios was performed in R but the final figures in the publication were generated in GraphPad using the same values 
+ggplot(odds, aes(x = OR, y = vars)) + 
+    geom_vline(aes(xintercept = 0), size = .25, linetype = "dashed") + 
+    geom_errorbarh(aes(xmax = upper, xmin = lower), size = .5, height = 
+                    .2, color = "gray50") +
+    geom_point(size = 3.5, color = "orange") +
+    theme_bw()+
+    theme(panel.grid.minor = element_blank()) +
+    ylab("") +
+    xlab("log(Odds ratio)") +
+    annotate(geom = "text", y =1.1, x = log10(13), 
+                     label = paste("Model p <", round(model_pval$`Pr(>Chi)`[2], digits = 4)), size = 3.5, hjust = 4) + 
+  annotate(geom = "text", y =0.7, x = log10(13), 
+                     label = paste("Pseudo R^2 = ", round(rsqrd$stats[10][1], digits = 2)), size = 3.5, hjust = 3.53) + 
+    ggtitle("Parameters and the risk of COVID infections")
+
+
+```
+
+
+```{r}
+# Visualize odd_plots for capillary
+library(ggplot2)
+library(OddsPlotty)
+library(caret)
+library(tidyverse)
+library(rms)
+
+
+
+# Generate testdata for manual scaling
+testdata <- numeric_covid_cap
+testdata$COVID.19.Positive. <- as.factor(testdata$COVID.19.Positive.)
+testdata$Vaccinated. <- as.factor(testdata$Vaccinated. )
+testdata$Prior.COVID.19. <- as.factor(testdata$Prior.COVID.19. )
+testdata$Gender <- as.factor(testdata$Gender)
+testdata$Significant.co.morbidity. <- as.factor(testdata$Significant.co.morbidity. )
+
+
+ # Set up null model
+model_null <- glm(COVID.19.Positive.~ 1, data=testdata, family=binomial(link='logit'))
+model_cap <- glm(COVID.19.Positive.~ ., data=testdata, family=binomial(link='logit'))
+summary(model_cap)
+model_pval <- anova(model_null, model_cap, test = 'LRT')
+rsqrd <- lrm(COVID.19.Positive.~ ., data=testdata)
+
+# Visualisations of odds ratios was performed in R but the final figures in the publication were generated in GraphPad using the same values 
+ggplot(odds, aes(x = OR, y = vars)) + 
+    geom_vline(aes(xintercept = 0), size = .25, linetype = "dashed") + 
+    geom_errorbarh(aes(xmax = upper, xmin = lower), size = .5, height = 
+                    .2, color = "gray50") +
+    geom_point(size = 3.5, color = "orange") +
+    theme_bw()+
+    theme(panel.grid.minor = element_blank()) +
+    ylab("") +
+    xlab("log(Odds ratio)") +
+    annotate(geom = "text", y =1.1, x = log10(13), 
+                     label = paste("Model p <", round(model_pval$`Pr(>Chi)`[2], digits = 4)), size = 3.5, hjust = 4) + 
+  annotate(geom = "text", y =0.7, x = log10(13), 
+                     label = paste("Pseudo R^2 = ", round(rsqrd$stats[10][1], digits = 2)), size = 3.5, hjust = 3.53) + 
+    ggtitle("Parameters and the risk of COVID infections")
+
+
+
+```
+
+
+```{r, fig.width=10, fig.height=4}
+library(grt)
+library(patchwork)
+#Exploring the impact of IFng and RBD on the predicted probability of infection derived from the logistic regression model
+# Exploratory in nature and not included in the publication 
+
+predicted.data_unscaled <- data.frame(
+  probability.of.infection =model_vein$fitted.values,
+  IFNg=numeric_covid_vein$IFNg,
+  RBD = numeric_covid_vein$RBD.IgG,
+  PriorInfection = as.factor(numeric_covid_vein$Prior.COVID.19.),
+  COVIDPositive = as.factor(numeric_covid_vein$COVID.19.Positive.))
+
+
+IFNg <- ggplot(data=predicted.data_unscaled, aes(x=IFNg, y=probability.of.infection)) +
+  geom_point(aes(colour = PriorInfection), show.legend = F) +
+  xlab("IFNg (pg/ml)") +
+  ylab("Predicted probability") +
+  labs(color='Prior Infection Status') +
+  scale_color_manual(labels = c("No", "Yes"), values = c("brown3", "darkgoldenrod1")) +
+  #ggtitle("Predicted probability of getting a breakthrough infection \n based on metrics from venous samples") +
+   # scale_x_continuous(trans = "log", breaks = c(10,100,1000)) +
+  theme(plot.title = element_text(size = 14, face = 'bold'),
+    axis.title.x = element_text(size = 12, face = 'bold'),
+    axis.text.x = element_text(size = 12),
+    axis.text.y = element_text(size = 12),
+    axis.title.y = element_text(size = 12, face = 'bold'),
+    legend.title = element_text(size = 12)) + 
+  theme(axis.line = element_line(colour = "black", size = 1),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.border = element_blank(),
+    panel.background = element_blank(),
+    legend.key=element_blank())
+
+RBD <- ggplot(data=predicted.data_unscaled, aes(x=RBD, y=probability.of.infection)) +
+  geom_point(aes(colour = PriorInfection)) +
+  xlab("Anti-RBD IgG") +
+  ylab("Predicted probability") +
+  labs(color='Prior Infection Status') +
+  scale_color_manual(labels = c("No", "Yes"), values = c("brown3", "darkgoldenrod1")) +
+ #ggtitle("Predicted probability of getting a breakthrough infection \n based on metrics from venous samples") +
+    #scale_x_continuous(trans = "log", breaks = c(10,100,1000)) +
+  theme(plot.title = element_text(size = 14, face = 'bold'),
+    axis.title.x = element_text(size = 12, face = 'bold'),
+    axis.text.x = element_text(size = 12),
+    axis.text.y = element_text(size = 12),
+    axis.title.y = element_text(size = 12, face = 'bold'),
+    legend.title = element_text(size = 12)) + 
+  theme(axis.line = element_line(colour = "black", size = 1),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.border = element_blank(),
+    panel.background = element_blank(),
+    legend.key=element_blank())
+
+
+IFNg + RBD
+
+
+# Relationship between IFNg and infection probability not linear
+# Based on this the analysis was repeated using quartile groups
+```
+
+
+
+```{r}
+library(caret)
+library(OddsPlotty)
+library(ggplot2)
+library(OddsPlotty)
+library(caret)
+library(tidyverse)
+library(rms)
+
+#Conversuin of IFNg/RBD into a quartile-group based factors
+
+numeric_covid_vein <- covid_data_vein[,c(2,3,4,5,6,7,8)]
+
+
+q1 <- summary(numeric_covid_vein$IFNg)[2]
+q2 <- summary(numeric_covid_vein$IFNg)[3]
+q3 <- summary(numeric_covid_vein$IFNg)[5]
+
+q1r <- summary(numeric_covid_vein$RBD.IgG)[2]
+q2r <- summary(numeric_covid_vein$RBD.IgG)[3]
+q3r <- summary(numeric_covid_vein$RBD.IgG)[5]
+
+numeric_covid_vein[numeric_covid_vein$IFNg < q1,]$IFNg <- 1
+numeric_covid_vein[numeric_covid_vein$IFNg >= q1 & numeric_covid_vein$IFNg < q2,]$IFNg <- 2
+numeric_covid_vein[numeric_covid_vein$IFNg >= q2 & numeric_covid_vein$IFNg < q3,]$IFNg <- 3
+numeric_covid_vein[numeric_covid_vein$IFNg >= q3,]$IFNg <- 4
+
+numeric_covid_vein[numeric_covid_vein$RBD.IgG < q1r,]$RBD.IgG <- 1
+numeric_covid_vein[numeric_covid_vein$RBD.IgG >= q1r & numeric_covid_vein$RBD.IgG < q2r,]$RBD.IgG <- 2
+numeric_covid_vein[numeric_covid_vein$RBD.IgG >= q2r & numeric_covid_vein$RBD.IgG < q3r,]$RBD.IgG <- 3
+numeric_covid_vein[numeric_covid_vein$RBD.IgG >= q3r,]$RBD.IgG <- 4
+
+
+
+numeric_covid_vein$IFNg <- factor(numeric_covid_vein$IFNg, levels = c(1,2,3,4))
+numeric_covid_vein$RBD.IgG <- factor(numeric_covid_vein$RBD.IgG, levels = c(1,2,3,4))
+
+
+#Repeat of glm
+model_vein <- glm(COVID.19.Positive.~ ., data=numeric_covid_vein, family=binomial(link='logit'))
+
+model_null <- glm(COVID.19.Positive.~ 1, data=numeric_covid_vein, family=binomial(link='logit'))
+
+model_pval <- anova(model_null, model_vein_final, test = 'LRT')
+rsqrd <- lrm(COVID.19.Positive.~ ., data=numeric_covid_vein)
+
+
+odds <- odds_plot(model_vein)
+odds <- odds$odds_data
+odds$OR <- log(odds$OR)
+odds$lower <- log(odds$lower)
+odds$upper <- log(odds$upper)
+
+summary(model_vein)
+
+ggplot(odds, aes(x = OR, y = vars)) + 
+    geom_vline(aes(xintercept = 0), size = .25, linetype = "dashed") + 
+    geom_errorbarh(aes(xmax = upper, xmin = lower), size = .5, height = 
+                    .2, color = "gray50") +
+    geom_point(size = 3.5, color = "orange") +
+    theme_bw()+
+    theme(panel.grid.minor = element_blank()) +
+    ylab("") +
+    xlab("log(Odds ratio)") +
+    annotate(geom = "text", y =3, x = log10(1), 
+                     label = paste("Model p <", round(model_pval$`Pr(>Chi)`[2], digits = 4)), size = 3.5, hjust = 4) + 
+  annotate(geom = "text", y =3, x = log10(1), 
+                     label = paste("Pseudo R^2 = ", round(rsqrd$stats[10][1], digits = 2)), size = 3.5, hjust = 3.53) + 
+    ggtitle("Parameters and the risk of COVID infections") +
+  scale_x_continuous(limits = c(-6,6))
+
+# Odd as percentages
+(exp(model_vein_final$coefficients[-1])-1)*100
+
+```
+
+
+```{r}
+# Development of final cross-validated using bestglm
+
+numeric_covid_vein <- covid_data_vein[,c(2,3,4,5,6,7,8)]
+
+q1 <- summary(numeric_covid_vein$IFNg)[2]
+q2 <- summary(numeric_covid_vein$IFNg)[3]
+q3 <- summary(numeric_covid_vein$IFNg)[5]
+
+q1r <- summary(numeric_covid_vein$RBD.IgG)[2]
+q2r <- summary(numeric_covid_vein$RBD.IgG)[3]
+q3r <- summary(numeric_covid_vein$RBD.IgG)[5]
+
+numeric_covid_vein[numeric_covid_vein$IFNg < q1,]$IFNg <- 1
+numeric_covid_vein[numeric_covid_vein$IFNg >= q1 & numeric_covid_vein$IFNg < q2,]$IFNg <- 2
+numeric_covid_vein[numeric_covid_vein$IFNg >= q2 & numeric_covid_vein$IFNg < q3,]$IFNg <- 3
+numeric_covid_vein[numeric_covid_vein$IFNg >= q3,]$IFNg <- 4
+
+numeric_covid_vein[numeric_covid_vein$RBD.IgG < q1r,]$RBD.IgG <- 1
+numeric_covid_vein[numeric_covid_vein$RBD.IgG >= q1r & numeric_covid_vein$RBD.IgG < q2r,]$RBD.IgG <- 2
+numeric_covid_vein[numeric_covid_vein$RBD.IgG >= q2r & numeric_covid_vein$RBD.IgG < q3r,]$RBD.IgG <- 3
+numeric_covid_vein[numeric_covid_vein$RBD.IgG >= q3r,]$RBD.IgG <- 4
+
+numeric_covid_vein$COVID.19.Positive. <- factor(numeric_covid_vein$COVID.19.Positive., levels = c(0,1))
+
+
+
+library(bestglm)
+test_bestglm <-numeric_covid_vein[, c(names(numeric_covid_vein)[-1], "COVID.19.Positive.")]
+names(test_bestglm)[7] <- "y"
+
+test_bestglm$Gender <- as.numeric(test_bestglm$Gender)
+test_bestglm$IFNg <- as.factor(test_bestglm$IFNg)
+test_bestglm$RBD.IgG <- as.factor(test_bestglm$RBD.IgG)
+
+
+bestglm_model <-
+    bestglm(Xy = test_bestglm,
+            family = binomial,
+            IC = "AIC",                 # Information criteria for
+            method = "exhaustive")
+
+
+summary(bestglm_model$BestModel)
+
+model_null <- glm(y ~ 1, data=test_bestglm, family=binomial(link='logit'))
+model_pval <- anova(model_null, bestglm_model$BestModel, test = 'LRT')
+rsqrd <- lrm(COVID.19.Positive.~ ., data=numeric_covid_vein)
+
+
+
+odds <- odds_plot(bestglm_model$BestModel)
+odds <- odds$odds_data
+write.csv(odds, file = "/Users/lorenzocapitani/OneDrive\ -\ Cardiff\ University/Bioinformatics/MartinPaper/odds_final.csv")
+odds$OR <- log(odds$OR)
+odds$lower <- log(odds$lower)
+odds$upper <- log(odds$upper)
+
+
+ggplot(odds, aes(x = OR, y = vars)) + 
+    geom_vline(aes(xintercept = 0), size = .25, linetype = "dashed") + 
+    geom_errorbarh(aes(xmax = upper, xmin = lower), size = .5, height = 
+                    .2, color = "gray50") +
+    geom_point(size = 3.5, color = "orange") +
+    theme_bw()+
+    theme(panel.grid.minor = element_blank()) +
+    ylab("") +
+    xlab("log(Odds ratio)") +
+    annotate(geom = "text", y = 0.75, x = log10(500), 
+                     label = paste("Model p <", round(model_pval$`Pr(>Chi)`[2], digits = 4)), size = 3.5, hjust = 4) + 
+  annotate(geom = "text", y =0.5, x = log10(1000), 
+                     label = paste("Pseudo R^2 = ", round(rsqrd$stats[10][1], digits = 2)), size = 3.5, hjust = 3.53) + 
+    ggtitle("Parameters and the risk of COVID infections") +
+  scale_x_continuous(limits = c(-6,6))
+
+
+
+# Odd as percentages
+(exp(bestglm_model$BestModel$coefficients[-1])-1)*100
+
+```
+
